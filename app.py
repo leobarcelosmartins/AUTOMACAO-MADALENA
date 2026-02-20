@@ -54,7 +54,7 @@ st.markdown("""
 # --- DICIONÁRIO DE DIMENSÕES DAS EVIDÊNCIAS ---
 DIMENSOES_CAMPOS = {
     "H_GRAFICO_ATEND_AMB": 165, "H_GRAFICO_ASSIST_HOSP": 125, "H_TAB_TRANS_HOSP": 125,
-    "H_GRAFICO_TRANS_HOSP": 125, "H_GRAFICO_SAIDA_HOSP": 125, "TOTAL_PACI_EMERG": 180,
+    "H_GRAFICO_TRANS_HOSP": 125, "H_GRAFICO_SAIDA_HOSP": 125,
     "H_GRAFICO_ATEND_EMERG": 180, "ATA_REUNIAO_OBITO": 165, "ATA_REUNIAO_PRONTUARIO": 165,
     "ATA_REUNIAO_INFEC": 165, "CAPS_GRAFICO_ATEND": 165, "CAPS_REGISTRO_FOTOGRAFICO": 165,
     "AB_GRAFICO_ATEND": 175, "AB_METAQUANTI_HOSP": 130, "AB_METAQUALI_HOSP": 175
@@ -203,6 +203,22 @@ with t_manual_ab:
 
 # --- ABA ARQUIVOS (EVIDÊNCIAS) ---
 with t_evidencia:
+    labels = {
+        "H_GRAFICO_ATEND_AMB": "Gráfico de Atendimento Hospitalar",
+        "H_GRAFICO_ASSIST_HOSP": "Gráfico de Assistência Hospitalar",
+        "H_TAB_TRANS_HOSP": "Tabela de Transferência Hospitalar",
+        "H_GRAFICO_TRANS_HOSP": "Gráfico de Transferência Hospitalar",
+        "H_GRAFICO_SAIDA_HOSP": "Gráfico de Saída Hospitalar",
+        "H_GRAFICO_ATEND_EMERG": "Gráfico de Atendimento de Emergência",
+        "ATA_REUNIAO_OBITO": "Ata Revisão de Óbito",
+        "ATA_REUNIAO_PRONTUARIO": "Ata Revisão de Prontuário",
+        "ATA_REUNIAO_INFEC": "Ata Controle de Infecção",
+        "CAPS_GRAFICO_ATEND": "Gráfico de Atendimento CAPS",
+        "CAPS_REGISTRO_FOTOGRAFICO": "Registro Fotográfico CAPS",
+        "AB_GRAFICO_ATEND": "Gráfico de Atendimento Antenção Básica",
+        "AB_METAQUANTI_HOSP": "Tabela Quanti",
+        "AB_METAQUALI_HOSP": "Tabela Quali"
+        }
     grupos_evidencias = [
         {"nome": "Ambulatorial / Hospitalar", "marcadores": ["H_GRAFICO_ATEND_AMB", "H_GRAFICO_ASSIST_HOSP", "H_TAB_TRANS_HOSP", "H_GRAFICO_TRANS_HOSP", "H_GRAFICO_SAIDA_HOSP"]},
         {"nome": "Emergência e Atas", "marcadores": ["H_GRAFICO_ATEND_EMERG", "ATA_REUNIAO_OBITO", "ATA_REUNIAO_PRONTUARIO", "ATA_REUNIAO_INFEC"]},
@@ -217,7 +233,7 @@ with t_evidencia:
             for idx, m in enumerate(grupo["marcadores"]):
                 target = ce1 if idx % 2 == 0 else ce2
                 with target:
-                    st.markdown(f"<span class='upload-label'>{m}</span>", unsafe_allow_html=True)
+                    st.markdown(f"<span class='upload-label'>{labels.get(m, m)}</span>", unsafe_allow_html=True)
                     f_up = st.file_uploader("Upload", type=['png', 'jpg', 'pdf'], key=f"f_{m}", label_visibility="collapsed")
                     if f_up:
                         if f_up.name not in [x['name'] for x in st.session_state.dados_sessao.get(m, [])]:
@@ -228,7 +244,7 @@ with t_evidencia:
                     pasted = paste_image_button(label="📸 Colar Print", key=kp)
                     if pasted is not None and pasted.image_data is not None:
                         st.session_state.dados_sessao[m].append({"name": f"Captura_{m}.png", "content": pasted.image_data, "type": "p"})
-                        st.toast(f"Anexado: {m}")
+                        st.toast(f"Anexado: {labels.get(m)}")
                         time.sleep(0.4); st.rerun()
                                         
                     if st.session_state.dados_sessao.get(m):
