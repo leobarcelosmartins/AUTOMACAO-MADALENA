@@ -155,7 +155,7 @@ with t_manual_amb:
         c18, c19, c20 = st.columns(3)
         with c18: st.number_input("Total Pacientes Internados", key="in_h_t_pac_int", step=1)
         with c19: st.number_input("Saída por Alta", key="in_h_s_alta", step=1)
-        with c20: st.number_input("Saída por Transferência", key="in_h_s_trans", step=1)
+       
 
     with st.container(border=True):
         st.markdown("### Óbitos e Permanência")
@@ -272,6 +272,7 @@ if st.button("FINALIZAR E GERAR RELATÓRIO", type="primary", width='stretch'):
                 total_saidas = sum([int(st.session_state.get(k, 0) or 0) for k in ["in_h_s_climed", "in_h_s_clicir", "in_h_s_cliobs", "in_h_s_cliped"]])
                 total_obitos = int(st.session_state.get("in_h_ob_maior", 0) or 0) + int(st.session_state.get("in_h_ob_menor", 0) or 0)
                 total_ab = sum([int(st.session_state.get(k, 0) or 0) for k in ["in_ab_cons_med", "in_ab_cons_enf", "in_ab_atend_odont", "in_ab_vist_domi"]])
+                h_s_trans = sum([int(st.session_state.get(k, 0) or 0) for k in ["in_h_temp_perm_menor", "in_h_temp_perm_maior"]])
 
                 dados_finais = {
                     "SISTEMA_MES_REFERENCIA": f"{st.session_state.get('sel_mes', 'Janeiro')}/{st.session_state.get('sel_ano', 2026)}",
@@ -296,7 +297,7 @@ if st.button("FINALIZAR E GERAR RELATÓRIO", type="primary", width='stretch'):
                     "H_T_CIR_GIN": st.session_state.get("in_h_t_cir_gin", 0),
                     "H_T_PAC_INT": st.session_state.get("in_h_t_pac_int", 0),
                     "H_S_ALTA": st.session_state.get("in_h_s_alta", 0),
-                    "H_S_TRANS": st.session_state.get("in_h_s_trans", 0),
+                    "H_S_TRANS": h_s_trans,
                     "H_OB_MAIOR": st.session_state.get("in_h_ob_maior", 0),
                     "H_OB_MENOR": st.session_state.get("in_h_ob_menor", 0),
                     "H_TEMP_PERM_MENOR": st.session_state.get("in_h_temp_perm_menor", 0),
