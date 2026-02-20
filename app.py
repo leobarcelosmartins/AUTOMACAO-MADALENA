@@ -273,9 +273,10 @@ if st.button("FINALIZAR E GERAR RELATÓRIO", type="primary", width='stretch'):
                 total_obitos = int(st.session_state.get("in_h_ob_maior", 0) or 0) + int(st.session_state.get("in_h_ob_menor", 0) or 0)
                 total_ab = sum([int(st.session_state.get(k, 0) or 0) for k in ["in_ab_cons_med", "in_ab_cons_enf", "in_ab_atend_odont", "in_ab_vist_domi"]])
                 h_s_trans = sum([int(st.session_state.get(k, 0) or 0) for k in ["in_h_temp_perm_menor", "in_h_temp_perm_maior"]])
+                mes_referencia = f"{st.session_state.get('sel_mes', 'Janeiro')}/{st.session_state.get('sel_ano', 2026)}"
 
                 dados_finais = {
-                    "SISTEMA_MES_REFERENCIA": f"{st.session_state.get('sel_mes', 'Janeiro')}/{st.session_state.get('sel_ano', 2026)}",
+                    "SISTEMA_MES_REFERENCIA": mes_referencia,
                     "H_TOTAL_ATEND_AMB": total_amb,
                     "H_ATEND_ESP_MED": h_atend_esp_med,
                     "H_CONSULTA_NAO_MED": h_consulta_nao_med,
@@ -338,16 +339,15 @@ if st.button("FINALIZAR E GERAR RELATÓRIO", type="primary", width='stretch'):
                 cd1, cd2 = st.columns(2)
                 with cd1:
                     with open(docx_p, "rb") as f_w:
-                        st.download_button("WORD (.docx)", f_w.read(), f"RELATÓRIO ASSISTENCIAL MENSAL - SANTA MARIA MADALENA {st.session_state.get('sel_mes', 'MAD')}.docx", width='stretch')
+                        st.download_button("WORD (.docx)", f_w.read(), f"RELATÓRIO ASSISTENCIAL MENSAL - SANTA MARIA MADALENA {mes_referencia}.docx", width='stretch')
                 with cd2:
                     try:
                         converter_para_pdf(docx_p, tmp)
                         pdf_p = os.path.join(tmp, "relatorio.pdf")
                         if os.path.exists(pdf_p):
                             with open(pdf_p, "rb") as f_p:
-                                st.download_button("PDF", f_p.read(), f"RELATÓRIO ASSISTENCIAL MENSAL - SANTA MARIA MADALENA {st.session_state.get('sel_mes', 'MAD')}.pdf", width='stretch')
+                                st.download_button("PDF", f_p.read(), f"RELATÓRIO ASSISTENCIAL MENSAL - SANTA MARIA MADALENA {mes_referencia}.pdf", width='stretch')
                     except: st.warning("PDF falhou.")
     except Exception as e: st.error(f"Erro Crítico: {e}")
 
 st.caption("Desenvolvido por Leonardo Barcelos Martins")
-
