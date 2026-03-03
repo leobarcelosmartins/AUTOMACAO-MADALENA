@@ -13,6 +13,8 @@ from PIL import Image
 import platform
 import time
 import calendar
+import json
+from pathlib import Path
 
 # --- CONFIGURAÇÕES DE LAYOUT ---
 st.set_page_config(page_title="Gerador de Relatórios Madalena", layout="wide")
@@ -60,9 +62,32 @@ DIMENSOES_CAMPOS = {
     "AB_GRAFICO_ATEND": 175, "AB_METAQUANTI_HOSP": 130, "AB_METAQUALI_HOSP": 175
 }
 
+# --- DIRETÓRIO DE RELATÓRIOS SALVOS ---
+BASE_RELATORIOS_DIR = Path("relatorios_salvos")
+BASE_RELATORIOS_DIR.mkdir(exist_ok=True)
+
+# --- CHAVES DE CAMPOS QUE SERÃO PERSISTIDAS ---
+FORM_KEYS = [
+    "sel_mes", "sel_ano",
+    "in_h_cli_med", "in_h_orto", "in_h_card", "in_h_neuro", "in_h_ped",
+    "in_h_gineco", "in_h_psiq", "in_h_gastr", "in_h_cir_gr",
+    "in_h_psico", "in_h_psic_ped", "in_h_fono", "in_h_terap",
+    "in_h_t_cirurgia", "in_h_t_cir_gr", "in_h_t_cir_gin",
+    "in_h_t_pac_int", "in_h_s_alta",
+    "in_h_ob_maior", "in_h_ob_menor",
+    "in_h_temp_perm_menor", "in_h_temp_perm_maior",
+    "in_h_s_climed", "in_h_s_clicir", "in_h_s_cliobs", "in_h_s_cliped",
+    "in_total_paci_emerg",
+    "in_caps_t_atend", "in_caps_atend_ind", "in_caps_atend_grp", "in_caps_t_grupos",
+    "in_ab_cons_med", "in_ab_cons_enf", "in_ab_atend_odont", "in_ab_vist_domi"
+]
+
 # --- ESTADO DA SESSÃO ---
 if 'dados_sessao' not in st.session_state:
     st.session_state.dados_sessao = {m: [] for m in DIMENSOES_CAMPOS.keys()}
+
+if 'relatorio_atual' not in st.session_state:
+    st.session_state.relatorio_atual = ""
 
 # --- SIDEBAR ---
 with st.sidebar:
@@ -71,7 +96,7 @@ with st.sidebar:
     st.markdown("---")
     total_anexos = sum(len(v) for v in st.session_state.dados_sessao.values())
     st.metric("Total de Evidências", total_anexos)
-    if st.button(" 🗑️ Limpar Todos os Dados", width='stretch'):
+    if st.button(" 🗑️ Limpar Todos os Dados", key="btn_limpar_tudo"):
         st.session_state.dados_sessao = {m: [] for m in DIMENSOES_CAMPOS.keys()}
         st.rerun()
 
@@ -79,14 +104,23 @@ with st.sidebar:
 def converter_para_pdf(docx_path, output_dir):
     comando = 'libreoffice'
     if platform.system() == "Windows":
-        caminhos = ['libreoffice', r'C:\Program Files\LibreOffice\program\soffice.exe', r'C:\Program Files (x86)\LibreOffice\program\soffice.exe']
+        caminhos = [
+            'libreoffice',
+            r'C:\Program Files\LibreOffice\program\soffice.exe',
+            r'C:\Program Files (x86)\LibreOffice\program\soffice.exe'
+        ]
         for p in caminhos:
             try:
                 subprocess.run([p, '--version'], capture_output=True, check=True)
                 comando = p
                 break
-            except: continue
-    subprocess.run([comando, '--headless', '--convert-to', 'pdf', '--outdir', output_dir, docx_path], check=True)
+            except:
+                continue
+    subprocess.run(
+        [comando, '--headless', '--convert-to', 'pdf', '--outdir', output_dir, docx_path],
+        check=True
+    )
+
 
 def processar_item_lista(doc_template, item, marcador):
     largura = DIMENSOES_CAMPOS.get(marcador, 165)
@@ -96,110 +130,331 @@ def processar_item_lista(doc_template, item, marcador):
             item.save(img_buf, format='PNG')
             img_buf.seek(0)
             return [InlineImage(doc_template, img_buf, width=Mm(largura))]
-        if hasattr(item, 'seek'): item.seek(0)
+        if hasattr(item, 'seek'):
+            item.seek(0)
         ext = getattr(item, 'name', '').lower()
         if ext.endswith(".pdf"):
             pdf = fitz.open(stream=item.read(), filetype="pdf")
             imgs = []
             for pg in pdf:
                 pix = pg.get_pixmap(matrix=fitz.Matrix(2, 2))
-                imgs.append(InlineImage(doc_template, io.BytesIO(pix.tobytes()), width=Mm(largura)))
+                imgs.append(
+                    InlineImage(doc_template, io.BytesIO(pix.tobytes()), width=Mm(largura))
+                )
             pdf.close()
             return imgs
         return [InlineImage(doc_template, item, width=Mm(largura))]
-    except Exception: return []
+    except Exception:
+        return []
+
+# --- FUNÇÕES DE PERSISTÊNCIA DE RELATÓRIO ---
+def _normalizar_nome_relatorio(nome: str) -> str:
+    """Transforma o nome em algo seguro para usar como pasta."""
+    nome = nome.strip()
+    for ch in r'\/:*?"<>|':
+        nome = nome.replace(ch, "_")
+    return nome or "relatorio_sem_nome"
+
+
+def listar_relatorios_salvos():
+    if not BASE_RELATORIOS_DIR.exists():
+        return []
+    return sorted([p.name for p in BASE_RELATORIOS_DIR.iterdir() if p.is_dir()])
+
+
+def _caminho_relatorio(nome_normalizado: str) -> Path:
+    return BASE_RELATORIOS_DIR / nome_normalizado
+
+
+def salvar_relatorio(nome_relatorio: str):
+    if not nome_relatorio:
+        st.warning("Informe um nome para o relatório antes de salvar.")
+        return
+
+    nome_norm = _normalizar_nome_relatorio(nome_relatorio)
+    pasta_rel = _caminho_relatorio(nome_norm)
+    pasta_rel.mkdir(parents=True, exist_ok=True)
+
+    # 1) Salvar estado dos campos
+    form_state = {k: st.session_state.get(k) for k in FORM_KEYS}
+
+    # 2) Salvar evidências em arquivos físicos
+    pasta_evid = pasta_rel / "evidencias"
+    pasta_evid.mkdir(exist_ok=True)
+
+    evidencias_meta = {}
+    for marcador, itens in st.session_state.dados_sessao.items():
+        evidencias_meta[marcador] = []
+        for idx, item in enumerate(itens):
+            nome_arquivo_original = item["name"]
+            tipo = item["type"]
+
+            # Descobrir extensão base a partir do nome original
+            _, ext = os.path.splitext(nome_arquivo_original)
+            ext = ext.lower()
+
+            conteudo = item["content"]
+
+            # NOVO: tratar especificamente imagens PIL (ex.: PngImageFile do paste_image_button)
+            if isinstance(conteudo, Image.Image):
+                buf = io.BytesIO()
+                conteudo.save(buf, format="PNG")
+                data = buf.getvalue()
+                if not ext:
+                    ext = ".png"
+            else:
+                # Conteúdo pode ser UploadedFile, BytesIO, bytes, etc.
+                if hasattr(conteudo, "getvalue"):
+                    data = conteudo.getvalue()
+                elif hasattr(conteudo, "read"):
+                    try:
+                        conteudo.seek(0)
+                    except Exception:
+                        pass
+                    data = conteudo.read()
+                else:
+                    # assume bytes
+                    data = conteudo
+
+                if not ext:
+                    ext = ".bin"
+
+            nome_arquivo_dest = f"{marcador}_{idx}{ext}"
+            caminho_arquivo_dest = pasta_evid / nome_arquivo_dest
+
+            with open(caminho_arquivo_dest, "wb") as f:
+                f.write(data)
+
+            evidencias_meta[marcador].append({
+                "name": nome_arquivo_original,
+                "file": f"evidencias/{nome_arquivo_dest}",
+                "type": tipo
+            })
+
+    # 3) Gravar JSON com o estado completo
+    estado = {
+        "form_state": form_state,
+        "evidencias": evidencias_meta
+    }
+
+    with open(pasta_rel / "estado.json", "w", encoding="utf-8") as f:
+        json.dump(estado, f, ensure_ascii=False, indent=2)
+
+    st.session_state.relatorio_atual = nome_norm
+    st.success(f"Relatório '{nome_relatorio}' salvo com sucesso.")
+
+
+def carregar_relatorio(nome_relatorio: str):
+    nome_norm = _normalizar_nome_relatorio(nome_relatorio)
+    pasta_rel = _caminho_relatorio(nome_norm)
+    estado_path = pasta_rel / "estado.json"
+
+    if not estado_path.exists():
+        st.error("Não foi encontrado estado salvo para este relatório.")
+        return
+
+    with open(estado_path, "r", encoding="utf-8") as f:
+        estado = json.load(f)
+
+    form_state = estado.get("form_state", {})
+    evidencias_meta = estado.get("evidencias", {})
+
+    # 1) Aplicar form_state ao session_state
+    for k, v in form_state.items():
+        st.session_state[k] = v
+
+    # 2) Reconstruir dados_sessao
+    st.session_state.dados_sessao = {m: [] for m in DIMENSOES_CAMPOS.keys()}
+
+    for marcador, lista_itens in evidencias_meta.items():
+        if marcador not in st.session_state.dados_sessao:
+            st.session_state.dados_sessao[marcador] = []
+        for meta in lista_itens:
+            caminho_arquivo = pasta_rel / meta["file"]
+            if not caminho_arquivo.exists():
+                continue
+            with open(caminho_arquivo, "rb") as f:
+                data = f.read()
+            bio = io.BytesIO(data)
+            bio.name = meta["name"]
+            st.session_state.dados_sessao[marcador].append({
+                "name": meta["name"],
+                "content": bio,
+                "type": meta.get("type", "f")
+            })
+
+    st.session_state.relatorio_atual = nome_norm
+    st.success(f"Relatório '{nome_relatorio}' carregado.")
 
 # --- UI PRINCIPAL ---
 st.title("Automação de Relatórios - Madalena")
 st.caption("Versão 0.9.2")
 
-t_manual_amb, t_manual_caps, t_manual_ab, t_evidencia = st.tabs(["AMBULATORIAL", "CAPS", "ATENÇÃO BÁSICA", "ARQUIVOS"])
+# --- GERENCIAMENTO DE RELATÓRIOS SALVOS ---
+with st.container(border=True):
+    st.markdown("#### Gerenciamento de Relatórios")
+
+    col1, col2, col3 = st.columns([2, 2, 1])
+
+    with col1:
+        relatorios_existentes = listar_relatorios_salvos()
+        opcao_rel = st.selectbox(
+            "Relatórios salvos",
+            ["(Novo relatório)"] + relatorios_existentes,
+            index=0
+        )
+
+    with col2:
+        nome_input = st.text_input(
+            "Nome do relatório",
+            value=st.session_state.relatorio_atual or ""
+        )
+
+    with col3:
+        if st.button("Carregar", key="btn_carregar_relatorio"):
+            if opcao_rel != "(Novo relatório)":
+                carregar_relatorio(opcao_rel)
+                st.rerun()
+            else:
+                st.warning("Selecione um relatório salvo para carregar.")
+
+        if st.button("Salvar", key="btn_salvar_relatorio"):
+            nome_para_salvar = nome_input or opcao_rel
+            if not nome_para_salvar or nome_para_salvar == "(Novo relatório)":
+                st.warning("Digite um nome para o relatório antes de salvar.")
+            else:
+                salvar_relatorio(nome_para_salvar)
+
+t_manual_amb, t_manual_caps, t_manual_ab, t_evidencia = st.tabs(
+    ["AMBULATORIAL", "CAPS", "ATENÇÃO BÁSICA", "ARQUIVOS"]
+)
 
 # --- ABA AMBULATORIAL ---
 with t_manual_amb:
     with st.container(border=True):
         st.markdown("### Período de Referência")
         c_p1, c_p2, _ = st.columns(3)
-        with c_p1: st.selectbox("Mês", ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"], key="sel_mes")
-        with c_p2: st.selectbox("Ano", [2024, 2025, 2026, 2027], index=2, key="sel_ano")
+        with c_p1:
+            st.selectbox(
+                "Mês",
+                ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+                 "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"],
+                key="sel_mes"
+            )
+        with c_p2:
+            st.selectbox("Ano", [2024, 2025, 2026, 2027], index=2, key="sel_ano")
     
     with st.container(border=True):
         st.markdown("### Atendimentos Ambulatoriais")
         c1, c2, c3 = st.columns(3)
-        with c1: st.number_input("Clínica Médica", key="in_h_cli_med", step=1)
-        with c2: st.number_input("Ortopedista", key="in_h_orto", step=1)
-        with c3: st.number_input("Cardiologia", key="in_h_card", step=1)
+        with c1:
+            st.number_input("Clínica Médica", key="in_h_cli_med", step=1)
+        with c2:
+            st.number_input("Ortopedista", key="in_h_orto", step=1)
+        with c3:
+            st.number_input("Cardiologia", key="in_h_card", step=1)
         c4, c5, c6 = st.columns(3)
-        with c4: st.number_input("Neurologista", key="in_h_neuro", step=1)
-        with c5: st.number_input("Pediatria", key="in_h_ped", step=1)
-        with c6: st.number_input("Ginecologista", key="in_h_gineco", step=1)
+        with c4:
+            st.number_input("Neurologista", key="in_h_neuro", step=1)
+        with c5:
+            st.number_input("Pediatria", key="in_h_ped", step=1)
+        with c6:
+            st.number_input("Ginecologista", key="in_h_gineco", step=1)
         c7, c8, c9 = st.columns(3)
-        with c7: st.number_input("Psiquiatra", key="in_h_psiq", step=1)
-        with c8: st.number_input("Gastroenterologista", key="in_h_gastr", step=1)
-        with c9: st.number_input("Cirurgião Geral", key="in_h_cir_gr", step=1)
+        with c7:
+            st.number_input("Psiquiatra", key="in_h_psiq", step=1)
+        with c8:
+            st.number_input("Gastroenterologista", key="in_h_gastr", step=1)
+        with c9:
+            st.number_input("Cirurgião Geral", key="in_h_cir_gr", step=1)
     
     with st.container(border=True):
         st.markdown("### Consultas Não Médicas")
         c10, c11, c12 = st.columns(3)
-        with c10: st.number_input("Psicólogo", key="in_h_psico", step=1)
-        with c11: st.number_input("Psicopedagogo", key="in_h_psic_ped", step=1)
-        with c12: st.number_input("Fonoaudiólogo", key="in_h_fono", step=1)
-        with st.columns(3)[0]: st.number_input("Terapeuta Ocupacional", key="in_h_terap", step=1)
+        with c10:
+            st.number_input("Psicólogo", key="in_h_psico", step=1)
+        with c11:
+            st.number_input("Psicopedagogo", key="in_h_psic_ped", step=1)
+        with c12:
+            st.number_input("Fonoaudiólogo", key="in_h_fono", step=1)
+        with st.columns(3)[0]:
+            st.number_input("Terapeuta Ocupacional", key="in_h_terap", step=1)
 
     with st.container(border=True):
         st.markdown("### Cirurgias e Internações")
         c15, c16, c17 = st.columns(3)
-        with c15: st.number_input("Total Proc. Cirúrgicos", key="in_h_t_cirurgia", step=1)
-        with c16: st.number_input("Total Cirurgia Geral", key="in_h_t_cir_gr", step=1)
-        with c17: st.number_input("Total Cirurgia Gineco/Obst", key="in_h_t_cir_gin", step=1)
+        with c15:
+            st.number_input("Total Proc. Cirúrgicos", key="in_h_t_cirurgia", step=1)
+        with c16:
+            st.number_input("Total Cirurgia Geral", key="in_h_t_cir_gr", step=1)
+        with c17:
+            st.number_input("Total Cirurgia Gineco/Obst", key="in_h_t_cir_gin", step=1)
         c18, c19, c20 = st.columns(3)
-        with c18: st.number_input("Total Pacientes Internados", key="in_h_t_pac_int", step=1)
-        with c19: st.number_input("Saída por Alta", key="in_h_s_alta", step=1)
+        with c18:
+            st.number_input("Total Pacientes Internados", key="in_h_t_pac_int", step=1)
+        with c19:
+            st.number_input("Saída por Alta", key="in_h_s_alta", step=1)
        
-
     with st.container(border=True):
         st.markdown("### Óbitos e Permanência")
         c21, c22, _ = st.columns(3)
-        with c21: st.number_input("Saída Óbito > 24H", key="in_h_ob_maior", step=1)
-        with c22: st.number_input("Saída Óbito < 24H", key="in_h_ob_menor", step=1)
-        c1, c2, _= st.columns(3)
-        with c1: st.number_input("Permanência < 24H", key="in_h_temp_perm_menor", step=1)
-        with c2: st.number_input("Permanência > 24H", key="in_h_temp_perm_maior", step=1)
+        with c21:
+            st.number_input("Saída Óbito > 24H", key="in_h_ob_maior", step=1)
+        with c22:
+            st.number_input("Saída Óbito < 24H", key="in_h_ob_menor", step=1)
+        c1, c2, _ = st.columns(3)
+        with c1:
+            st.number_input("Permanência < 24H", key="in_h_temp_perm_menor", step=1)
+        with c2:
+            st.number_input("Permanência > 24H", key="in_h_temp_perm_maior", step=1)
 
     with st.container(border=True):
         st.markdown("### Saídas por Clínica")
         c24, c25, _ = st.columns(3)
-        with c24: st.number_input("Saída Clínica Médica", key="in_h_s_climed", step=1)
-        with c25: st.number_input("Saída Clínica Cirúrgica", key="in_h_s_clicir", step=1)
+        with c24:
+            st.number_input("Saída Clínica Médica", key="in_h_s_climed", step=1)
+        with c25:
+            st.number_input("Saída Clínica Cirúrgica", key="in_h_s_clicir", step=1)
         c1, c2, _ = st.columns(3)
-        with c1: st.number_input("Saída Clínica Obstétrica", key="in_h_s_cliobs", step=1)
-        with c2: st.number_input("Saída Clínica Pediátrica", key="in_h_s_cliped", step=1)
+        with c1:
+            st.number_input("Saída Clínica Obstétrica", key="in_h_s_cliobs", step=1)
+        with c2:
+            st.number_input("Saída Clínica Pediátrica", key="in_h_s_cliped", step=1)
 
     with st.container(border=True):
         st.markdown("### Emergência")
-        with st.columns(3)[0]: st.number_input("Total Pacientes Emergência", key="in_total_paci_emerg", step=1)
+        with st.columns(3)[0]:
+            st.number_input("Total Pacientes Emergência", key="in_total_paci_emerg", step=1)
 
 # --- ABA CAPS ---
 with t_manual_caps:
     with st.container(border=True):
         st.markdown("### Indicadores CAPS")
         c1, c2 = st.columns(2)
-        with c1: st.number_input("Total Atendimentos CAPS", key="in_caps_t_atend", step=1)
-        with c2: st.number_input("Atendimento Individual", key="in_caps_atend_ind", step=1)
+        with c1:
+            st.number_input("Total Atendimentos CAPS", key="in_caps_t_atend", step=1)
+        with c2:
+            st.number_input("Atendimento Individual", key="in_caps_atend_ind", step=1)
         c1, c2 = st.columns(2)
-        with c1: st.number_input("Atendimento de Grupo", key="in_caps_atend_grp", step=1)
-        with c2: st.number_input("Quantidade de Grupos CAPS", key="in_caps_t_grupos", step=1)
+        with c1:
+            st.number_input("Atendimento de Grupo", key="in_caps_atend_grp", step=1)
+        with c2:
+            st.number_input("Quantidade de Grupos CAPS", key="in_caps_t_grupos", step=1)
 
 # --- ABA ATENÇÃO BÁSICA ---
 with t_manual_ab:
     with st.container(border=True):
         st.markdown("### Indicadores AB")
         ab1, ab2 = st.columns(2)
-        with ab1: st.number_input("Consultas Médicas AB", key="in_ab_cons_med", step=1)
-        with ab2: st.number_input("Consultas Enfermagem AB", key="in_ab_cons_enf", step=1)
+        with ab1:
+            st.number_input("Consultas Médicas AB", key="in_ab_cons_med", step=1)
+        with ab2:
+            st.number_input("Consultas Enfermagem AB", key="in_ab_cons_enf", step=1)
         ab1, ab2 = st.columns(2)
-        with ab1: st.number_input("Atendimento Odonto AB", key="in_ab_atend_odont", step=1)
-        with ab2: st.number_input("Visita Domiciliar AB", key="in_ab_vist_domi", step=1)
+        with ab1:
+            st.number_input("Atendimento Odonto AB", key="in_ab_atend_odont", step=1)
+        with ab2:
+            st.number_input("Visita Domiciliar AB", key="in_ab_vist_domi", step=1)
 
 # --- ABA ARQUIVOS (EVIDÊNCIAS) ---
 with t_evidencia:
@@ -218,12 +473,35 @@ with t_evidencia:
         "AB_GRAFICO_ATEND": "Gráfico de Atendimento Antenção Básica",
         "AB_METAQUANTI_HOSP": "Tabela Quanti",
         "AB_METAQUALI_HOSP": "Tabela Quali"
-        }
+    }
     grupos_evidencias = [
-        {"nome": "Ambulatorial / Hospitalar", "marcadores": ["H_GRAFICO_ATEND_AMB", "H_GRAFICO_ASSIST_HOSP", "H_TAB_TRANS_HOSP", "H_GRAFICO_TRANS_HOSP", "H_GRAFICO_SAIDA_HOSP"]},
-        {"nome": "Emergência e Atas", "marcadores": ["H_GRAFICO_ATEND_EMERG", "ATA_REUNIAO_OBITO", "ATA_REUNIAO_PRONTUARIO", "ATA_REUNIAO_INFEC"]},
-        {"nome": "CAPS", "marcadores": ["CAPS_GRAFICO_ATEND", "CAPS_REGISTRO_FOTOGRAFICO"]},
-        {"nome": "Atenção Básica", "marcadores": ["AB_GRAFICO_ATEND", "AB_METAQUANTI_HOSP", "AB_METAQUALI_HOSP"]}
+        {
+            "nome": "Ambulatorial / Hospitalar",
+            "marcadores": [
+                "H_GRAFICO_ATEND_AMB",
+                "H_GRAFICO_ASSIST_HOSP",
+                "H_TAB_TRANS_HOSP",
+                "H_GRAFICO_TRANS_HOSP",
+                "H_GRAFICO_SAIDA_HOSP"
+            ]
+        },
+        {
+            "nome": "Emergência e Atas",
+            "marcadores": [
+                "H_GRAFICO_ATEND_EMERG",
+                "ATA_REUNIAO_OBITO",
+                "ATA_REUNIAO_PRONTUARIO",
+                "ATA_REUNIAO_INFEC"
+            ]
+        },
+        {
+            "nome": "CAPS",
+            "marcadores": ["CAPS_GRAFICO_ATEND", "CAPS_REGISTRO_FOTOGRAFICO"]
+        },
+        {
+            "nome": "Atenção Básica",
+            "marcadores": ["AB_GRAFICO_ATEND", "AB_METAQUANTI_HOSP", "AB_METAQUALI_HOSP"]
+        }
     ]
 
     for grupo in grupos_evidencias:
@@ -233,46 +511,91 @@ with t_evidencia:
             for idx, m in enumerate(grupo["marcadores"]):
                 target = ce1 if idx % 2 == 0 else ce2
                 with target:
-                    st.markdown(f"<span class='upload-label'>{labels.get(m, m)}</span>", unsafe_allow_html=True)
-                    f_up = st.file_uploader("Upload", type=['png', 'jpg', 'pdf'], key=f"f_{m}", label_visibility="collapsed")
+                    st.markdown(
+                        f"<span class='upload-label'>{labels.get(m, m)}</span>",
+                        unsafe_allow_html=True
+                    )
+                    f_up = st.file_uploader(
+                        "Upload",
+                        type=['png', 'jpg', 'pdf'],
+                        key=f"f_{m}",
+                        label_visibility="collapsed"
+                    )
                     if f_up:
                         if f_up.name not in [x['name'] for x in st.session_state.dados_sessao.get(m, [])]:
-                            st.session_state.dados_sessao[m].append({"name": f_up.name, "content": f_up, "type": "f"})
+                            st.session_state.dados_sessao[m].append(
+                                {"name": f_up.name, "content": f_up, "type": "f"}
+                            )
                             st.rerun()
 
                     kp = f"p_{m}_{len(st.session_state.dados_sessao.get(m, []))}"
                     pasted = paste_image_button(label="📸 Colar Print", key=kp)
                     if pasted is not None and pasted.image_data is not None:
-                        st.session_state.dados_sessao[m].append({"name": f"Captura_{m}.png", "content": pasted.image_data, "type": "p"})
+                        st.session_state.dados_sessao[m].append(
+                            {
+                                "name": f"Captura_{m}.png",
+                                "content": pasted.image_data,
+                                "type": "p"
+                            }
+                        )
                         st.toast(f"Anexado: {labels.get(m)}")
-                        time.sleep(0.4); st.rerun()
+                        time.sleep(0.4)
+                        st.rerun()
                                         
                     if st.session_state.dados_sessao.get(m):
                         for i_idx, item in enumerate(st.session_state.dados_sessao[m]):
                             with st.expander(f"📄 {item['name']}", expanded=False):
-                                is_img = item['type'] == "p" or item['name'].lower().endswith(('.png', '.jpg', '.jpeg'))
-                                if is_img: st.image(item['content'], width='stretch')
-                                else: st.info(f"PDF pronto.")
+                                is_img = (
+                                    item['type'] == "p" or
+                                    item['name'].lower().endswith(('.png', '.jpg', '.jpeg'))
+                                )
+                                if is_img:
+                                    st.image(item['content'])
+                                else:
+                                    st.info("PDF pronto.")
                                 if st.button("Remover", key=f"del_{m}_{i_idx}"):
                                     st.session_state.dados_sessao[m].pop(i_idx)
                                     st.rerun()
 
 # --- GERAÇÃO FINAL ---
-if st.button("FINALIZAR E GERAR RELATÓRIO", type="primary", width='stretch'):
+if st.button("FINALIZAR E GERAR RELATÓRIO", type="primary", key="btn_finalizar"):
     try:
         with st.spinner("Gerando documentos..."):
             with tempfile.TemporaryDirectory() as tmp:
                 docx_p = os.path.join(tmp, "relatorio.docx")
                 doc = DocxTemplate("template-madalena.docx")
                 
-                h_atend_esp_med = sum([int(st.session_state.get(k, 0) or 0) for k in ["in_h_cli_med", "in_h_orto", "in_h_card", "in_h_neuro", "in_h_ped", "in_h_gineco", "in_h_psiq", "in_h_gastr", "in_h_cir_gr"]])
-                h_consulta_nao_med = sum([int(st.session_state.get(k, 0) or 0) for k in ["in_h_psico", "in_h_psic_ped", "in_h_fono", "in_h_terap"]])
+                h_atend_esp_med = sum([
+                    int(st.session_state.get(k, 0) or 0)
+                    for k in [
+                        "in_h_cli_med", "in_h_orto", "in_h_card", "in_h_neuro",
+                        "in_h_ped", "in_h_gineco", "in_h_psiq", "in_h_gastr", "in_h_cir_gr"
+                    ]
+                ])
+                h_consulta_nao_med = sum([
+                    int(st.session_state.get(k, 0) or 0)
+                    for k in ["in_h_psico", "in_h_psic_ped", "in_h_fono", "in_h_terap"]
+                ])
                 total_amb = h_atend_esp_med + h_consulta_nao_med
                 
-                total_saidas = sum([int(st.session_state.get(k, 0) or 0) for k in ["in_h_s_climed", "in_h_s_clicir", "in_h_s_cliobs", "in_h_s_cliped"]])
-                total_obitos = int(st.session_state.get("in_h_ob_maior", 0) or 0) + int(st.session_state.get("in_h_ob_menor", 0) or 0)
-                total_ab = sum([int(st.session_state.get(k, 0) or 0) for k in ["in_ab_cons_med", "in_ab_cons_enf", "in_ab_atend_odont", "in_ab_vist_domi"]])
-                h_s_trans = sum([int(st.session_state.get(k, 0) or 0) for k in ["in_h_temp_perm_menor", "in_h_temp_perm_maior"]])
+                total_saidas = sum([
+                    int(st.session_state.get(k, 0) or 0)
+                    for k in ["in_h_s_climed", "in_h_s_clicir", "in_h_s_cliobs", "in_h_s_cliped"]
+                ])
+                total_obitos = int(st.session_state.get("in_h_ob_maior", 0) or 0) + int(
+                    st.session_state.get("in_h_ob_menor", 0) or 0
+                )
+                total_ab = sum([
+                    int(st.session_state.get(k, 0) or 0)
+                    for k in [
+                        "in_ab_cons_med", "in_ab_cons_enf",
+                        "in_ab_atend_odont", "in_ab_vist_domi"
+                    ]
+                ])
+                h_s_trans = sum([
+                    int(st.session_state.get(k, 0) or 0)
+                    for k in ["in_h_temp_perm_menor", "in_h_temp_perm_maior"]
+                ])
                 mes_referencia = f"{st.session_state.get('sel_mes', 'Janeiro')}/{st.session_state.get('sel_ano', 2026)}"
 
                 dados_finais = {
@@ -325,7 +648,8 @@ if st.button("FINALIZAR E GERAR RELATÓRIO", type="primary", width='stretch'):
                     imgs_word = []
                     for item in st.session_state.dados_sessao.get(marcador, []):
                         res = processar_item_lista(doc, item['content'], marcador)
-                        if res: imgs_word.extend(res)
+                        if res:
+                            imgs_word.extend(res)
                     dados_finais[marcador] = imgs_word
                 
                 try:
@@ -339,15 +663,27 @@ if st.button("FINALIZAR E GERAR RELATÓRIO", type="primary", width='stretch'):
                 cd1, cd2 = st.columns(2)
                 with cd1:
                     with open(docx_p, "rb") as f_w:
-                        st.download_button("WORD (.docx)", f_w.read(), f"RELATÓRIO ASSISTENCIAL MENSAL - SANTA MARIA MADALENA {mes_referencia}.docx", width='stretch')
+                        st.download_button(
+                            "WORD (.docx)",
+                            f_w.read(),
+                            f"RELATÓRIO ASSISTENCIAL MENSAL - SANTA MARIA MADALENA {mes_referencia}.docx",
+                            key="download_docx"
+                        )
                 with cd2:
                     try:
                         converter_para_pdf(docx_p, tmp)
                         pdf_p = os.path.join(tmp, "relatorio.pdf")
                         if os.path.exists(pdf_p):
                             with open(pdf_p, "rb") as f_p:
-                                st.download_button("PDF", f_p.read(), f"RELATÓRIO ASSISTENCIAL MENSAL - SANTA MARIA MADALENA {mes_referencia}.pdf", width='stretch')
-                    except: st.warning("PDF falhou.")
-    except Exception as e: st.error(f"Erro Crítico: {e}")
+                                st.download_button(
+                                    "PDF",
+                                    f_p.read(),
+                                    f"RELATÓRIO ASSISTENCIAL MENSAL - SANTA MARIA MADALENA {mes_referencia}.pdf",
+                                    key="download_pdf"
+                                )
+                    except:
+                        st.warning("PDF falhou.")
+    except Exception as e:
+        st.error(f"Erro Crítico: {e}")
 
 st.caption("Desenvolvido por Leonardo Barcelos Martins")
