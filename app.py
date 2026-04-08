@@ -14,6 +14,7 @@ import platform
 import time
 import calendar
 import json
+import zipfile
 from pathlib import Path
 
 # --- CONFIGURAÇÕES DE LAYOUT ---
