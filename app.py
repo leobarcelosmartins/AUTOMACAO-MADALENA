@@ -381,39 +381,39 @@ with st.container(border=True):
         )
 
 # --- GERENCIAMENTO DE RELATÓRIOS SALVOS ---
-with st.container(border=True):
-    st.markdown("#### Gerenciamento de Relatórios")
+#with st.container(border=True):
+#    st.markdown("#### Gerenciamento de Relatórios")
 
-    col1, col2, col3 = st.columns([2, 2, 1])
+#    col1, col2, col3 = st.columns([2, 2, 1])
 
-    with col1:
-        relatorios_existentes = listar_relatorios_salvos()
-        opcao_rel = st.selectbox(
-            "Relatórios salvos",
-            ["(Novo relatório)"] + relatorios_existentes,
-            index=0
-        )
+ #   with col1:
+  #      relatorios_existentes = listar_relatorios_salvos()
+   #     opcao_rel = st.selectbox(
+    #        "Relatórios salvos",
+     #       ["(Novo relatório)"] + relatorios_existentes,
+      #      index=0
+       # )
 
-    with col2:
-        nome_input = st.text_input(
-            "Nome do relatório",
-            value=st.session_state.relatorio_atual or ""
-        )
+#    with col2:
+ #       nome_input = st.text_input(
+  #          "Nome do relatório",
+   #         value=st.session_state.relatorio_atual or ""
+    #    )
 
-    with col3:
-        if st.button("Carregar", key="btn_carregar_relatorio"):
-            if opcao_rel != "(Novo relatório)":
-                carregar_relatorio(opcao_rel)
-                st.rerun()
-            else:
-                st.warning("Selecione um relatório salvo para carregar.")
+#    with col3:
+ #       if st.button("Carregar", key="btn_carregar_relatorio"):
+  #          if opcao_rel != "(Novo relatório)":
+   #             carregar_relatorio(opcao_rel)
+    #            st.rerun()
+     #       else:
+      #          st.warning("Selecione um relatório salvo para carregar.")
 
-        if st.button("Salvar", key="btn_salvar_relatorio"):
-            nome_para_salvar = nome_input or opcao_rel
-            if not nome_para_salvar or nome_para_salvar == "(Novo relatório)":
-                st.warning("Digite um nome para o relatório antes de salvar.")
-            else:
-                salvar_relatorio(nome_para_salvar)
+#        if st.button("Salvar", key="btn_salvar_relatorio"):
+ #           nome_para_salvar = nome_input or opcao_rel
+  #          if not nome_para_salvar or nome_para_salvar == "(Novo relatório)":
+   #             st.warning("Digite um nome para o relatório antes de salvar.")
+    #        else:
+     #           salvar_relatorio(nome_para_salvar)
 
 t_manual_amb, t_manual_caps, t_manual_ab, t_evidencia = st.tabs(
     ["AMBULATORIAL", "CAPS", "ATENÇÃO BÁSICA", "ARQUIVOS"]
