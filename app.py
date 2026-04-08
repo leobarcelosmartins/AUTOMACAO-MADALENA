@@ -53,17 +53,33 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
+# --- BACKUP DE SEGURANÇA (DOWNLOAD/UPLOAD) ---
 with st.container(border=True):
-    st.markdown("#### ☁️ Backup de Segurança")
+    st.markdown("#### ☁️ Backup de Segurança (Exportar / Importar)")
+    st.caption("Utilize esta opção para não perder os seus dados caso o servidor reinicie.")
+    
     col_up, col_down = st.columns(2)
+    
     with col_up:
-        zip_upload = st.file_uploader("📥 Retomar Relatório", type=["zip"])
-        if zip_upload and st.button("Restaurar Dados"):
-            processar_upload_backup(zip_upload)
-            st.rerun()
+        zip_upload = st.file_uploader("📥 Retomar Relatório (Carregar .zip)", type=["zip"], key="upload_backup")
+        if zip_upload:
+            if st.button("Restaurar Dados do ZIP", key="btn_restore", use_container_width=True):
+                processar_upload_backup(zip_upload)
+                time.sleep(1)
+                st.rerun()
+
     with col_down:
+        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
         zip_buffer = gerar_backup_zip()
-        st.download_button("📤 Baixar .zip", data=zip_buffer, file_name="Backup.zip", type="primary")
+        nome_backup = f"Backup_Relatorio_{st.session_state.get('sel_mes', 'Atual')}.zip"
+        st.download_button(
+            label="📤 Guardar Progresso (Baixar .zip)",
+            data=zip_buffer,
+            file_name=nome_backup,
+            mime="application/zip",
+            type="primary",
+            use_container_width=True
+        )
 
 # --- DICIONÁRIO DE DIMENSÕES DAS EVIDÊNCIAS ---
 DIMENSOES_CAMPOS = {
