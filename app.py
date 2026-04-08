@@ -100,6 +100,67 @@ with st.sidebar:
         st.session_state.dados_sessao = {m: [] for m in DIMENSOES_CAMPOS.keys()}
         st.rerun()
 
+# --- GERAR BACKUP DO RELATÓRIO ---
+def gerar_backup_zip():
+    """Cria um ficheiro ZIP em memória contendo o estado.json e as imagens."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        evid_meta = {}
+        for marcador, itens in st.session_state.dados_sessao.items():
+            evid_meta[marcador] = []
+            for i, item in enumerate(itens):
+                conteudo = item["content"]
+                if hasattr(conteudo, "seek"): conteudo.seek(0)
+                
+                file_bytes = b""
+                if isinstance(conteudo, Image.Image):
+                    img_buf = io.BytesIO()
+                    conteudo.save(img_buf, format="PNG")
+                    file_bytes = img_buf.getvalue()
+                else:
+                    if hasattr(conteudo, "getvalue"): file_bytes = conteudo.getvalue()
+                    elif hasattr(conteudo, "read"): file_bytes = conteudo.read()
+                    else: file_bytes = conteudo
+                
+                if hasattr(conteudo, "seek"): conteudo.seek(0)
+                
+                nome_interno = f"evidencias/{marcador}_{i}.png"
+                zf.writestr(nome_interno, file_bytes)
+                evid_meta[marcador].append({"name": item["name"], "file": nome_interno, "type": item["type"]})
+        
+        estado = {"form_state": {k: st.session_state.get(k) for k in FORM_KEYS}, "evidencias": evid_meta}
+        zf.writestr("estado.json", json.dumps(estado, ensure_ascii=False, indent=2))
+    
+    buf.seek(0)
+    return buf
+
+def processar_upload_backup(uploaded_zip):
+    """Lê um ficheiro ZIP e restaura todos os dados para a interface."""
+    try:
+        with zipfile.ZipFile(uploaded_zip, "r") as zf:
+            estado_str = zf.read("estado.json").decode("utf-8")
+            estado = json.loads(estado_str)
+            
+            for k, v in estado.get("form_state", {}).items():
+                st.session_state[k] = v
+            
+            st.session_state.dados_sessao = {m: [] for m in DIMENSOES_CAMPOS.keys()}
+            for marcador, lista in estado.get("evidencias", {}).items():
+                for meta in lista:
+                    try:
+                        file_bytes = zf.read(meta["file"])
+                        bio = io.BytesIO(file_bytes)
+                        bio.name = meta["name"]
+                        st.session_state.dados_sessao[marcador].append({
+                            "name": meta["name"], 
+                            "content": bio, 
+                            "type": meta["type"]
+                        })
+                    except Exception: pass
+        st.success("✅ Backup importado com sucesso!")
+    except Exception as e:
+        st.error(f"Erro ao ler o ficheiro de backup: {e}")
+
 # --- FUNÇÕES CORE ---
 def converter_para_pdf(docx_path, output_dir):
     comando = 'libreoffice'
