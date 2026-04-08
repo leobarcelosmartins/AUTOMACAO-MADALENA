@@ -53,6 +53,18 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
+with st.container(border=True):
+    st.markdown("#### ☁️ Backup de Segurança")
+    col_up, col_down = st.columns(2)
+    with col_up:
+        zip_upload = st.file_uploader("📥 Retomar Relatório", type=["zip"])
+        if zip_upload and st.button("Restaurar Dados"):
+            processar_upload_backup(zip_upload)
+            st.rerun()
+    with col_down:
+        zip_buffer = gerar_backup_zip()
+        st.download_button("📤 Baixar .zip", data=zip_buffer, file_name="Backup.zip", type="primary")
+
 # --- DICIONÁRIO DE DIMENSÕES DAS EVIDÊNCIAS ---
 DIMENSOES_CAMPOS = {
     "H_GRAFICO_ATEND_AMB": 165, "H_GRAFICO_ASSIST_HOSP": 125, "H_TAB_TRANS_HOSP": 125,
